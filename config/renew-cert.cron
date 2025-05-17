@@ -1,0 +1,2 @@
+# minute hour day month dow  command
+0 3 * * *  python3 /app/cert_manager.py renew >> /data/logs/cron.log 2>&1

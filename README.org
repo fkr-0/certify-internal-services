@@ -1,0 +1,116 @@
+* certdns
+:PROPERTIES:
+:CUSTOM_ID: certdns
+:END:
+_A single Alpine container that marries Let’s Encrypt (via `acme.sh`) with `dnsmasq`, so every sub-domain in your lab gets an auto-renewed TLS certificate **and** a DNS A-record – then ships that cert wherever you need it._
+
+-----
+
+* 0 Why this README exists
+  - *Quick orientation* – what lives where and why.
+  - *Values you must configure* before the stack can run.
+  - *Copy-paste example* for the impatient.
+  - *TODO list* – the rough edges we already know about.
+
+Feel free to open a PR or edit this doc in place; it’s meant to live alongside the code.
+
+-----
+
+* 1 Directory layout
+#+begin_example
+project/
+├── docker-compose.yml   # exposes port 53 → certdns service
+├── scripts/             # boot + helpers (root phase then uid-drop)
+│   ├── boot.sh
+│   ├── boot_user.sh
+│   ├── cert_manager.py  # ACME, deploy, dnsmasq reload
+│   └── watch_targets.sh # inotify → instant reload on targets.yml save
+├── config/              # user-editable knobs
+│   ├── targets.yml      # <— the file you maintain
+│   ├── renew.cron       # schedule for nightly renew
+│   └── dnsmasq.conf     # auto-generated, DO NOT EDIT
+└── data/                # volume mount – certs + logs land here
+#+end_example
+
+-----
+
+* 2 What you **must** configure
+#+CAPTION: Mandatory keys you edit.
+| File | Key | Purpose |
+|------|-----|---------|
+| *config/targets.yml* | `domain_root` | Base domain (e.g. `example.com`). |
+| | `acme_contact_email` | Let’s Encrypt account e-mail. |
+| | `acme_dns_provider` | One of acme.sh’s providers (`dns_cloudflare`, `dns_route53`, `dns_manual`, …). |
+| | `targets[]` | List of services.<br>Each target has:<br>  `name` (label),<br>  `subdomain` → `sub.${domain_root}`,<br>  `ip` (A record),<br>  `deploy` (method `scp`/`rsync`/`cp`, dest, optional `ssh_key`). |
+| *config/renew.cron* | cron line | When `cert_manager.py renew` should run (inside-container time). |
+
+#+begin_quote
+Heads-up: *config/dnsmasq.conf* is rebuilt automatically – edit *targets.yml* instead.
+#+end_quote
+
+-----
+
+* 3 Quick-start example
+1. **Clone**:
+   #+begin_src bash
+   git clone https://github.com/you/certdns.git
+   cd certdns
+   #+end_src
+2. **Edit targets** (`config/targets.yml`):
+   #+begin_src yaml
+   domain_root: example.com
+   acme_contact_email: admin@example.com
+   acme_dns_provider: dns_cloudflare
+
+   targets:
+     - name: demo
+       subdomain: app
+       ip: 10.0.0.10
+       deploy:
+         method: scp
+         destination: ubuntu@10.0.0.10:/etc/ssl/app.pem
+         ssh_key: /config/id_rsa
+   #+end_src
+3. **DNS authority**: ensure this host answers `*.example.com` **or** your provider matches `acme_dns_provider`.
+4. **Run**:
+   #+begin_src bash
+   docker compose up -d
+   #+end_src
+5. **Verify**:
+   #+begin_src bash
+   dig +short app.example.com @<container-ip>
+   openssl x509 -in data/certs/app.example.com/app.example.com.cer -noout -dates
+   #+end_src
+
+-----
+
+* 4 Runtime behaviour (TL;DR)
+**Start-up**
+  1. Installs Alpine packages & acme.sh.
+  2. Creates unprivileged user `app`, drops root.
+  3. Loads cron into `/var/spool/cron/crontabs/app`.
+  4. Applies `cap_net_bind_service,cap_net_raw` to `dnsmasq` binary so it can bind :53 without root.
+
+**Regular loop**
+  - `watch_targets.sh` watches *targets.yml* → instant `sync`.
+  - Nightly cron runs `renew`.
+  - Each run: rewrite *dnsmasq.conf*, SIGHUP dnsmasq, issue/renew certs, deploy.
+
+Logs rotate under *data/logs/* (`RotatingFileHandler` + logrotate).
+
+-----
+
+* 5 TODO / Open tasks
+- [ ] Health-check endpoint (`/status`) for orchestrators.
+- [ ] Integration tests with authoritative DNS container.
+- [ ] Parameterise container timezone (defaults to Europe/Berlin).
+- [ ] Pin APK / acme.sh versions for reproducible boots.
+- [ ] Prometheus exporter (cert expiry gauge, renew success counter).
+- [ ] Harden runtime (pivot-root / distroless variant).
+- [ ] Add macOS/Windows resolver-forward how-to.
+
+:RESULTS:
+🏗️ Plenty left to do – contributions welcome!
+:END:
+
+-----

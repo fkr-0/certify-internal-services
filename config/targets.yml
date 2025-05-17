@@ -1,0 +1,21 @@
+---
+# Global defaults --------------------------------------------------
+domain_root:
+acme_contact_email:
+acme_dns_provider: dns_desec # dns_manual  or cloudflare, route53, …
+# ./acme.sh --issue --dns dns_desec -d foobar.dedyn.io -d *.foobar.dedyn.io
+# A list of (subdomain ↔︎ IP ↔︎ deploy-rule) triples ---------------
+targets:
+  # - name: demo-service
+  #   subdomain: app
+  #   ip: 10.0.0.10
+  #   deploy:
+  #     method: scp
+  #     destination: user@10.0.0.10:/etc/ssl/app.pem
+  #     ssh_key: /config/id_rsa
+  - name: nginx-local
+    subdomain: web
+    ip: 10.0.0.20
+    deploy:
+      method: cp
+      destination: /data/export/web.pem
